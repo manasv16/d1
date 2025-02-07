@@ -1,0 +1,55 @@
+name: Deploy Angular App to EC2
+
+on:
+  push:
+    branches:
+      - master  # Runs when code is pushed to "master"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the Code
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20  # Adjust version if needed
+
+      # Step 3: Install Dependencies and Build Angular
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Angular App
+        run: npm run build --prod
+
+      # Step 4: Log in to Docker Hub
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+
+      # Step 5: Build and Push Docker Image
+      - name: Build Docker Image
+        run: docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/angular-app:latest .
+
+      - name: Push Docker Image to Docker Hub
+        run: docker push ${{ secrets.DOCKER_HUB_USERNAME }}/angular-app:latest
+
+      # Step 6: Deploy and Run Container on EC2
+      - name: Set up SSH Key
+        run: |
+          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
+          chmod 400 key.pem
+
+      - name: Deploy Docker Container on EC2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i key.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} <<EOF
+            docker stop angular-container || true
+            docker rm angular-container || true
+            docker rmi ${{ secrets.DOCKER_HUB_USERNAME }}/angular-app || true
+            docker pull ${{ secrets.DOCKER_HUB_USERNAME }}/angular-app:latest
+            docker run -d --name angular-container -p 80:80 ${{ secrets.DOCKER_HUB_USERNAME }}/angular-app:latest
+          EOF
